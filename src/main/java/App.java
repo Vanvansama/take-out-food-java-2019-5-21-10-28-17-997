@@ -1,3 +1,7 @@
+import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 
 /*
@@ -13,8 +17,131 @@ public class App {
     }
 
     public String bestCharge(List<String> inputs) {
-        //TODO: write code here
+        List<Item> items = itemRepository.findAll();
+        List<SalesPromotion> promotions = salesPromotionRepository.findAll();
 
-        return null;
+        //菜品id快捷定位
+        HashMap<String,Integer> itemIndex = new HashMap<>();
+        for (int i = 0; i < items.size(); i++) {
+            itemIndex.put(items.get(i).getId(),i);
+        }
+
+        //不同优惠类型的id快捷定位
+        HashMap<String,Integer> buyAndSave = new HashMap<>();
+        HashMap<String,Integer> discount = new HashMap<>();
+
+        //所有打折菜品的id
+        HashMap<String,String> discountItem = new HashMap<>();
+
+        for (int i = 0; i < promotions.size(); i++) {
+            if (promotions.get(i).getType().matches("BUY_[0-9]+_SAVE_[0-9]+_YUAN")){
+                buyAndSave.put(promotions.get(i).getType(),i);
+            }else if (promotions.get(i).getType().matches("[0-9]+%_DISCOUNT_ON_SPECIFIED_ITEMS")){
+                discount.put(promotions.get(i).getType(),i);
+                List<String> list = promotions.get(i).getRelatedItems();
+                for (String id : list) {
+                    discountItem.put(id,promotions.get(i).getType());
+                }
+            }
+        }
+
+        //点菜菜单
+        String orderList = "";
+        //最后总价
+        double orderSum = 0;
+        //不参与打折的总价
+        double orderOrigin = 0;
+        //参与打折菜品优惠的总价
+        double orderSumTemp= 0;
+        //参与满减优惠的总价
+        double orderSumPlus = 0;
+        //最后选择的打折类型
+        String promotionsType = "";
+        //参与打折菜品优惠的优惠类型
+        String promotionsTypeTemp = "";
+        //参与满减优惠的优惠类型
+        String promotionsTypePlus = "";
+
+        //价格格式化输出
+        DecimalFormat df = new DecimalFormat("###.####");
+
+        for (String input : inputs){
+            String[] arr = input.split(" x ");
+            if (itemIndex.containsKey(arr[0])){
+                int index = itemIndex.get(arr[0]);
+                Item item = items.get(index);
+                double prices = item.getPrice()*Integer.parseInt(arr[1]);
+                orderList += (item.getName()+" x "+arr[1]+" = "+df.format(prices)+"元\n");
+                orderSum += prices;
+
+                if (discountItem.containsKey(arr[0])){
+                    int dis = Integer.parseInt(discountItem.get(arr[0]).substring(0,1));
+                    orderSumTemp += dis*prices*0.1;
+                    promotionsTypeTemp = discountItem.get(arr[0]);
+                }
+
+            }
+        }
+
+        orderOrigin = orderSum;
+
+        //满减的价格优惠计算
+        for (String key : buyAndSave.keySet()) {
+            String type = key;
+            type = type.replace("BUY_","");
+            type = type.replace("SAVE_","");
+            type = type.replace("_YUAN","");
+            String[] arr = type.split("_");
+            String buy = arr[0];
+            String save = arr[1];
+            if (orderSum >= Integer.parseInt(buy)){
+                double temp = orderSum - Integer.parseInt(save);
+                if (temp < orderSumPlus || orderSumPlus == 0.0){
+                    promotionsTypePlus = key;
+                    orderSumPlus = temp;
+                }
+            }
+        }
+
+        //对比两种优惠哪种更优惠
+        if(orderSumPlus < orderSum-orderSumTemp && orderSumPlus!=0){
+            promotionsType = promotionsTypePlus;
+            orderSum = orderSumPlus;
+        }else if (orderSumPlus > orderSum-orderSumTemp && orderSumPlus!=0){
+            promotionsType = promotionsTypeTemp;
+            orderSum = orderSum-orderSumTemp;
+        }
+
+        //订单明细里的优惠信息输出
+        String out = "";
+
+        if (promotionsType.equals("")){
+            out = "";
+        }else if (promotionsType.matches("BUY_[0-9]+_SAVE_[0-9]+_YUAN")){
+            SalesPromotion salesPromotion = promotions.get(buyAndSave.get(promotionsType));
+            double dis = orderOrigin - orderSum;
+            out = "使用优惠:\n" +salesPromotion.getDisplayName()+"，省"+df.format(dis)+"元\n"+"-----------------------------------\n" ;
+        }else if (promotionsType.matches("[0-9]+%_DISCOUNT_ON_SPECIFIED_ITEMS")){
+            SalesPromotion salesPromotion = promotions.get(discount.get(promotionsType));
+            String itemString = "";
+            for (int i = 0; i < inputs.size(); i++) {
+                String[] arr = inputs.get(i).split(" x ");
+                if (discountItem.containsKey(arr[0])){
+                    Item item = items.get(itemIndex.get(arr[0]));
+                    itemString += item.getName();
+                    if (i<inputs.size()-1){
+                        itemString += "，";
+                    }
+                }
+            }
+            out = "使用优惠:\n" +salesPromotion.getDisplayName()+"("+itemString+")，省"+df.format(orderSumTemp)+"元\n"+"-----------------------------------\n" ;
+        }
+
+        return "============= 订餐明细 =============\n" +
+                orderList+
+                "-----------------------------------\n" +
+                out+
+                "总计："+df.format(orderSum)+"元\n" +
+                "===================================";
     }
 }
